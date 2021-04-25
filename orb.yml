@@ -1,0 +1,211 @@
+version: 2.1
+
+description: |
+  Easily install and use Strawberry Static Site Generator (SSG) (formally known
+  as Gotham) on CircleCI. Strawberry is an SSG used to build fast, efficient,
+  and secure websites from Markdown files. Strawberry is a soft fork of Hugo
+  and is 99% compatible so this orb will work to build, test, and deploy both
+  Strawberry and Hugo websites.
+
+  Built-in testing is done with HTML Proofer. This orb includes an executor but
+  works with Linux and macOS images.
+
+display:
+    home_url: "https://www.StrawberrySSG.com"
+    source_url: "https://github.com/hubci/strawberry-orb"
+
+orbs:
+  os-detect: circleci/os-detect@0.2
+
+executors:
+  hubci:
+    description: "The 'hubci/strawberry' Docker image."
+    parameters:
+      tag:
+        description: "The 'hubci/strawberry' Docker image version tag."
+        type: string
+    docker:
+      - image: hubci/strawberry:<< parameters.tag >>
+
+commands:
+  install:
+    description: |
+      Install Strawberry in a build. Supports Linux and macOS on amd64.
+    parameters:
+      version:
+        description: "The Strawberry version to install. This is a full SemVer version."
+        type: string
+    steps:
+      - os-detect/init
+      - run:
+          name: "Install Strawberry"
+          command: |
+            case $OSD_FAMILY in
+              linux)
+                OS=linux
+                PKG_EXT=tar.gz
+                ;;
+              darwin)
+                OS=macos
+                PKG_EXT=tar.gz
+                ;;
+              *)
+                echo "Unsupported operating system."
+                exit 1
+                ;;
+            esac
+
+            dlURL=https://github.com/strawberryssg/strawberry-v0/releases/download/v<< parameters.version >>/strawberry-v<< parameters.version >>-${OS}-amd64.${PKG_EXT}
+
+            # If the download fails...
+            if curl --fail -sSL "$dlURL" 2>/dev/null | $SUDO tar -xz -C /usr/local/bin strawberry 2>/dev/null; then
+              echo "We're good, continue."
+            else
+              if [[ ! << parameters.version >> =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+                echo "Failed to install. The version number '<< parameters.version >>' is not a full valid SemVer version."
+              else
+                echo "Please choose a valid version from the Strawberry tags page, without the leading 'v': https://github.com/strawberryssg/strawberry-v0/tags"
+                echo "The download URL that failed was: ${dlURL}"
+              fi
+
+              exit 1
+            fi
+  html-proofer:
+    description: |
+      Run HTML Proofer on the generated site for testing. Ruby and the
+      `html-proofer` gem must already be installed to use.
+    parameters:
+      path:
+        description: "Path to generated files relative to working_directory."
+        type: string
+        default: "./public/"
+    steps:
+      - run:
+          name: "Test generated website with HTML Proofer."
+          command: "htmlproofer << parameters.path >> --allow-hash-href --check-html --empty-alt-ignore --disable-external"
+  build:
+    description: Build a static site with Strawberry located at 'source'. The default is '.'.
+    parameters:
+      source:
+        description: "Path to Strawberry root relative to 'working_directory'."
+        type: string
+        default: "."
+      destination:
+        description: "Path to where Strawberry outputs generated site. Relative to `source`."
+        type: string
+        default: "./public/"
+      extra-flags:
+        description: "Additional flags to pass when running Strawberry (e.g. -DF)."
+        type: string
+        default: ""
+      hugo-env:
+        description: "Set the value of HUGO_ENV prior to running Strawberry."
+        type: string
+        default: production
+    steps:
+      - run:
+         name: Build with Strawberry
+         command: HUGO_ENV=<< parameters.hugo-env >> strawberry -v -s << parameters.source >> -d << parameters.destination >> << parameters.extra-flags >>
+
+jobs:
+  build:
+    description: "Build a site with Strawberry."
+    executor:
+      name: hubci
+      tag: << parameters.version >>
+    parameters:
+      version:
+        description: "Strawberry version to use. This is a SemVer version without the 'v'."
+        type: string
+      source:
+        description: "Path to Strawberry root relative to working_directory."
+        type: string
+        default: "."
+      destination:
+        description: "Path to where Strawberry outputs generated site. Relative to `source`."
+        type: string
+        default: "./public"
+      html-proofer:
+        description: "Whether or not to test the outputted HTML with HTML Proofer."
+        type: boolean
+        default: true
+      hugo-env:
+        description: "Set the value of HUGO_ENV prior to running Strawberry."
+        type: string
+        default: "production"
+      strawberry-extra-flags:
+        description: "Additional flags to pass when running Strawberry (e.g. -DF)."
+        type: string
+        default: ""
+      persist-to-workspace:
+        description: "Whether to persist generated files to a CircleCI Workspace. This uses `parameters.source` as root and 'parameters.destination' as the path."
+        type: boolean
+        default: true
+    steps:
+      - checkout
+      - run:
+         name: "Checkout Submodules if Needed"
+         # Useful for when the theme is a submodule
+         command: |
+           if [ -f ".gitmodules" ]; then
+             git submodule sync
+             git submodule update --init --recursive
+           fi
+      - build:
+         source: << parameters.source >>
+         destination: << parameters.destination >>
+         extra-flags: << parameters.strawberry-extra-flags >>
+      - when:
+         condition: << parameters.html-proofer >>
+         steps:
+           - html-proofer:
+              path: << parameters.source >>/<< parameters.destination >>
+      - when:
+         condition: << parameters.persist-to-workspace >>
+         steps:
+           - persist_to_workspace:
+              paths:
+                - << parameters.destination >>
+              root: << parameters.source >>
+
+examples:
+  build-and-deploy:
+    description: |
+      "An example of building a Strawberry site, testing with HTML Proofer, and deployng it. Here the Strawberry source is in a subdirectory called 'src'. The deploy job is empty and serves as an example. Instead of the 'ls' command, you'd want to deploy the files using whatever tools you're used to."
+    usage:
+      version: 2.1
+      orbs:
+        strawberry: hubci/strawberry@0.1
+      workflows:
+        main:
+          jobs:
+            - strawberry/build:
+                html-proofer: true
+                source: src/
+                version: "0.15"
+            - deploy:
+                filters:
+                  branches:
+                    only: trunk
+                requires:
+                  - strawberry/build
+      jobs:
+        deploy:
+          docker:
+            - image: cimg/base:2021.04
+          steps:
+            - attach_workspace:
+                at: my-site
+            - run: ls -lah my-site
+  build-and-test:
+    description: "The simplest example of using the Strawberry orb."
+    usage:
+      version: 2.1
+      orbs:
+        strawberry: hubci/strawberry@0.1
+      workflows:
+        main:
+          jobs:
+            - strawberry/build:
+                html-proofer: true
+                version: "0.15"
