@@ -38,12 +38,12 @@ workflows:
           orb-path: orb.yml
           requires:
             - orb-tools/lint
-          context: orbs
+          context: circleci-ctx
       # trigger an integration workflow to test the
       # dev:${CIRCLE_SHA1:0:7} version of your orb
       - orb-tools/trigger-integration-tests-workflow:
           name: trigger-integration-dev
-          context: orbs
+          context: circleci-ctx
           requires:
             - orb-tools/publish-dev
   integration-test_deploy:
@@ -68,8 +68,7 @@ workflows:
           filters:
             branches:
               only: trunk
-          context:
-            - orbs
+          context: circleci-ctx
 
 jobs:
   integration-test-install:
