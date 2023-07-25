@@ -82,7 +82,7 @@ commands:
     steps:
       - run:
           name: "Test generated website with HTML Proofer."
-          command: "htmlproofer << parameters.path >> --allow-hash-href --check-html --disable-external"
+          command: "htmlproofer << parameters.path >> --allow-hash-href true --disable-external true"
   build:
     description: Build a static site with Strawberry located at 'source'. The default is '.'.
     parameters:
